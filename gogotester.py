@@ -2,13 +2,6 @@ __author__ = 'vincent'
 
 Ver = "0.1.0"
 
-# import gevent
-# from gevent import lock
-# from gevent import monkey
-# monkey.patch_os()
-# monkey.patch_socket()
-# monkey.patch_ssl()
-
 import os
 import socket
 import time
@@ -35,11 +28,14 @@ class Gogotester(object):
         self.socket_timeout = cfg["socket_timeout"]
         self.ssl_timeout = cfg["ssl_timeout"]
 
+        self.ipv4_pool = []
+        self.ipv6_pool = []
+
     def search_ipv4(self):
         result = []
         found = 0
         for ip in self.ippool.get_ipv4_addresses():
-            if link.test_socket(ip):
+            if link.test_socket(ip)[0]:
                 result.append(link)
                 found += 1
             if found == self.ipv4_limit:
@@ -58,12 +54,35 @@ class Gogotester(object):
         return result
 
     def test_ssl(self):
-        pass
+        for ip in self.ipv4_pool:
+            status = link.test_ssl(ip)
+            if status == 200:
+                print("%s is avaliable" % ip)
+
+    def gevent_ipv4(self, ip):
+        res = link.test_socket(ip)
+        if res[0]:
+            return ip, res[1]
+        return
+
+    def gevent_ipv6(self, ip):
+        res = link.test_socket(ip)
+        if res[0]:
+            return ip, res[1]
+        return
+
+    # def gevent_ssl(self, ip):
+        # res = link.test_ssl(ip)
+        # if link.test_ssl(ip)
 
     def run(self):
-        pass
+        ipv4s = self.ippool.get_ipv4_addresses()[:400]
+        # ipv6s = self.ippool.get_ipv6_addresses()[40]
+        jobs = [gevent.spawn(self.gevent_ipv4, ip) for ip in ipv4s]
+        gevent.joinall(jobs, timeout=2)
+        return jobs
 
 
 if __name__ == "__main__":
     gogo = Gogotester("./ggc.txt", "config.ini")
-    gogo.search_ipv4()
+    gogo.run()
