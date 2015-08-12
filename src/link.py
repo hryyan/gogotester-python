@@ -37,60 +37,47 @@ def unfold_ips(ipsets, ips, lock):
 @asyncio.coroutine
 def test_socket(ips, result, lock):
     while True:
-        with (yield from lock):
-            if lock.stop:
-                return
-        # ip地址不足够，从ipset中生成
-        if ips.empty():
-            yield from asyncio.sleep(0.1)
-            continue
-        # 连接
-        ip = yield from ips.get()
         try:
-            logging.info("Socket: %s" % ip)
+            with (yield from lock):
+                if lock.stop:
+                    return
+            # ip地址不足够，从ipset中生成
+            if ips.empty():
+                yield from asyncio.sleep(0.1)
+                continue
+            # 连接
+            ip = yield from ips.get()
+            # logging.info("Socket: %s" % ip)
             connect = asyncio.open_connection(ip, 443)
-            reader, writer = yield from asyncio.wait_for(connect, timeout=1)
-        except OSError:
-            continue
-        except asyncio.TimeoutError:
-            continue
-        else:
+            reader, writer = yield from asyncio.shield(asyncio.wait_for(connect, timeout=1))
             writer.close()
+            connect.close()
             yield from result.put(ip)
+        except (OSError,
+                ConnectionRefusedError,
+                asyncio.TimeoutError):
+            continue
 
 
 @asyncio.coroutine
-def test_ssl(searched, result, limit, ssl_ctx, pattern, lock=None):
+def test_ssl(searched, result, limit, ssl_ctx, patterns, lock):
     while True:
-        # with (yield from lock):
-        #     if lock.stop:
-        #         return
-        #     if result.qsize() > limit:
-        #         lock.stop = True
-        #         return
-        if searched.empty():
-            yield from asyncio.sleep(0.1)
-            continue
-        ip = yield from searched.get()
-
         try:
+            with (yield from lock):
+                if lock.stop:
+                    return
+                if result.qsize() > limit:
+                    lock.stop = True
+                    return
+            if searched.empty():
+                yield from asyncio.sleep(0.1)
+                continue
+            ip = yield from searched.get()
+
             logging.info("SSL: %s" % ip)
             connect = asyncio.open_connection(ip, 443, ssl=ssl_ctx, server_hostname="")
-            reader, writer = yield from connect
-        except OSError:
-            continue
-        except asyncio.TimeoutError:
-            continue
-        except asyncio.InvalidStateError:
-            continue
-        except ssl.SSLEOFError:
-            continue
-        except ssl.SSLError:
-            continue
-        except:
-            continue
+            reader, writer = yield from asyncio.shield(asyncio.wait_for(connect, timeout=10))
 
-        try:
             query = ("HEAD /search?q=g HTTP/1.1\r\nHost: www.google.com.hk\r\n\r\n"
                      "GET /%s HTTP/1.1\r\nHost: azzvxgoagent%s.appspot.com\r\n"
                      "Connection: close\r\n\r\n") % (platform.python_version(), random.randrange(7))
@@ -111,58 +98,15 @@ def test_ssl(searched, result, limit, ssl_ctx, pattern, lock=None):
                     n.append(server_name[:-1])
             if "200" in s:
                 print(ip)
-            yield from result.put((ip, s, n))
-        except:
+                yield from result.put((ip, s, n))
+            writer.close()
+        except (OSError,
+                ConnectionRefusedError,
+                asyncio.TimeoutError,
+                asyncio.InvalidStateError,
+                ssl.SSLError,
+                ssl.SSLEOFError):
             continue
-        writer.close()
-
-
-@asyncio.coroutine
-def test_ssl1(ips, result, limit, ssl_ctx, patterns):
-    while True:
-        if result.qsize() > limit:
-            return
-        if ips.empty():
-            yield from asyncio.sleep(0.05)
-            continue
-        ip = yield from ips.get()
-
-        try:
-            print("Tring %s", ip)
-            connect = asyncio.open_connection(ip, 443, ssl=ssl_ctx, server_hostname="")
-            reader, writer = yield from asyncio.wait_for(connect, timeout=10)
-            # reader, writer = yield from connect
-        except OSError:
-            continue
-        except asyncio.TimeoutError:
-            continue
-        except ssl.SSLError:
-            continue
-        except ssl.SSLEOFError:
-            continue
-
-        query = ("HEAD /search?q=g HTTP/1.1\r\nHost: www.google.com.hk\r\n\r\n"
-                 "GET /%s HTTP/1.1\r\nHost: azzvxgoagent%s.appspot.com\r\n"
-                 "Connection: close\r\n\r\n") % (platform.python_version(), random.randrange(7))
-        writer.write(query.encode('latin1'))
-        s = []
-        n = []
-        while True:
-            line = yield from reader.readline()
-            if not line:
-                break
-            status = patterns[0].search(line.decode('latin1'))
-            server_name = patterns[1].search(line.decode('latin1'))
-            if status:
-                status = status.group(1)
-                s.append(status)
-            if server_name:
-                server_name = server_name.group(1)
-                n.append(server_name[:-1])
-        if "200" in s:
-            print(ip)
-        yield from result.put((ip, s, n))
-        writer.close()
 
 
 if __name__ == "__main__":
@@ -176,16 +120,25 @@ if __name__ == "__main__":
     patterns.append(re.compile("Server: (.+)"))
     loop = asyncio.get_event_loop()
     ip_list = ["216.58.209.130",
-               "216.58.216.225",
-               "173.194.27.72",
+               # "216.58.216.225",
+               # "173.194.27.72",
                # "74.125.107.234",
                # "173.194.15.166",
                # "216.58.212.79",
-               "173.194.115.5",
-               "173.194.148.213",
-               "113.21.24.3",
-               "212.181.117.10",
-               "212.181.117.6",
+               # "173.194.115.5",
+               # "173.194.148.213",
+               # "113.21.24.3",
+               # "212.181.117.10",
+               # "212.181.117.6",
+               "87.244.198.10",
+               "87.244.198.42",
+               "87.244.198.98",
+               "87.244.198.101",
+               "31.7.160.9",
+               "31.7.160.59",
+               "31.7.160.65",
+               "31.7.160.69",
+               "31.7.160.149"
                "212.181.117.14"]
 
     ip_q = asyncio.Queue()

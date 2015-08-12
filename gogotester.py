@@ -101,6 +101,7 @@ class Gogotester(object):
             tasks.extend(ssl_v6_tasks)
 
         loop = asyncio.get_event_loop()
+        loop.set_debug(True)
         loop.run_until_complete(asyncio.wait(tasks))
         loop.close()
 
