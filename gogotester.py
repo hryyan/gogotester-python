@@ -44,6 +44,11 @@ class Gogotester(object):
                                                 self.params["ipv4_limit"],
                                                 infos))
 
+    def test(self):
+        ipv4_sets = self.ippool.get_ipv4_sets()
+        link.run(ipv4_sets, 900, 50, 10, dict())
+
 if __name__ == "__main__":
     gogo = Gogotester("./ggc.txt", "config.ini")
-    gogo.run()
+    # gogo.run()
+    gogo.test()
