@@ -18,7 +18,7 @@ def unfold_ips(ipsets, socket_limit, ssl_limit, result_num, infos, family="IPv4"
     logging.info("Search in %s", family)
     logging.info("%(family)s total: %(ip_num)s" % infos)
 
-    ssl_ctx = ssl.create_default_context(cafile="/home/vincent/Documents/not-about-work/gogotester-python/cacert.pem")
+    ssl_ctx = ssl.create_default_context(cafile="./cacert.pem")
     ssl_ctx.verify_mode = ssl.CERT_REQUIRED
     ssl_ctx.set_ciphers("ECDHE-RSA-AES128-SHA")
     ssl_ctx.check_hostname = False
