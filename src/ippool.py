@@ -74,7 +74,7 @@ class Ippool(object):
             self.ipv6_count += len(ips)
 
         logging.info("IPv4 pool has %d addresses" % self.ipv4_count)
-        logging.info("IPv6 pool has %d addressed" % self.ipv6_count)
+        logging.info("IPv6 pool has %d addresses" % self.ipv6_count)
 
     def get_ipv4_sets(self):
         return self.ipv4
