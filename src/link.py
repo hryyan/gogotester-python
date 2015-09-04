@@ -1,134 +1,150 @@
 __author__ = 'vincent'
 
-import asyncio
-import time
 import re
-import ssl
 import platform
 import random
 import logging
+import eventlet
+from eventlet.green import socket
+from eventlet.green import ssl
+
+cert = "./cacert.pem"
+ciphers = "ECDHE-RSA-AES128-SHA"
+query = ("HEAD /search?q=g HTTP/1.1\r\nHost: www.google.com.hk\r\n\r\n"
+         "GET /%s HTTP/1.1\r\nHost: azzvxgoagent%s.appspot.com\r\n"
+         "Connection: close\r\n\r\n") % (platform.python_version(), random.randrange(7))
+ctx = ssl.create_default_context(cafile=cert)
+ctx.verify_mode = ssl.CERT_REQUIRED
+ctx.set_ciphers(ciphers)
+ctx.check_hostname = False
+patterns = []
+patterns.append(re.compile("HTTP/1\.[0-1].+?([\d]{1,3})"))
+patterns.append(re.compile("Server: (.+)"))
 
 
-@asyncio.coroutine
-def unfold_ips(ipsets, socket_limit, ssl_limit, result_num, infos, family="IPv4"):
-    infos["family"] = family
-    infos["tested"] = 0
-    infos["remain"] = infos["ip_num"]
-    infos["found"] = 0
-    logging.info("Search in %s", family)
-    logging.info("%(family)s total: %(ip_num)s" % infos)
-
-    ssl_ctx = ssl.create_default_context(cafile="./cacert.pem")
-    ssl_ctx.verify_mode = ssl.CERT_REQUIRED
-    ssl_ctx.set_ciphers("ECDHE-RSA-AES128-SHA")
-    ssl_ctx.check_hostname = False
-    patterns = []
-    patterns.append(re.compile("HTTP/1\.[0-1].+?([\d]{1,3})"))
-    patterns.append(re.compile("Server: (.+)"))
-
-    socket_result = asyncio.Queue()
-    ssl_result = asyncio.Queue()
-    index = 0
-
-    while ssl_result.qsize() < result_num:
-        ip_set = ipsets[index]
-        index += 1
-        ips = [ip.strNormal() for ip in list(ip_set)]
-        ips_len = len(ips)
-        tasks = []
-
-        try:
-            while len(ips) != 0:
-                tasks.clear()
-                for i in range(socket_limit):
-                    try:
-                        tasks.append(asyncio.async(test_socket(ips.pop(), socket_result)))
-                    except IndexError:
-                        continue
-                yield from asyncio.wait(tasks)
-        except:
-            continue
-
-        if socket_result.empty():
-            continue
-        socket_result_list = []
-        while not socket_result.empty():
-            socket_result_list.append(socket_result.get_nowait())
-
-        try:
-            while len(socket_result_list) != 0 and ssl_result.qsize() < result_num:
-                tasks.clear()
-                for i in range(ssl_limit):
-                    try:
-                        tasks.append(
-                            asyncio.async(
-                                test_ssl(socket_result_list.pop(), ssl_result, ssl_ctx, patterns, result_num)))
-                    except IndexError:
-                        continue
-                yield from asyncio.wait(tasks)
-        except:
-            continue
-
-        infos["tested"] += ips_len
-        infos["remain"] -= ips_len
-        infos["found"] = ssl_result.qsize()
-        logging.info("%(family)s tested: %(tested)s, %(family)s remain: %(remain)s", infos)
-        logging.info("%(family)s found: %(found)s", infos)
-
-    result = []
-    while not ssl_result.empty():
-        result.append(ssl_result.get_nowait())
-
-    infos["found"] = ssl_result.qsize()
-    logging.info("%(family)s search quit, found %(found)s available ips", infos)
-    for i in result[:result_num]:
-        logging.info("ips: %s" % i)
-
-
-@asyncio.coroutine
-def test_socket(ip, result):
-    try:
-        logging.debug("Socket: %s", ip)
-        connect = asyncio.open_connection(ip, 443)
-        reader, writer = yield from asyncio.wait_for(connect, timeout=1)
-        yield from asyncio.sleep(0.0001)
-        writer.close()
-        connect.close()
-        yield from result.put(ip)
-    except:
-        return
-
-
-@asyncio.coroutine
-def test_ssl(ip, result, ssl_ctx, patterns, limit):
-    try:
-        if result.qsize() > limit:
+def test_socket(ip_q, socket_q, ssl_q, socket_timeout):
+    while True:
+        if ssl_q.full():
             return
-        logging.debug("SSL: %s", ip)
-        connect = asyncio.open_connection(ip, 443, ssl=ssl_ctx, server_hostname="")
-        reader, writer = yield from asyncio.wait_for(connect, timeout=10)
-        yield from asyncio.sleep(0.0001)
+        c = socket.socket()
+        c.settimeout(socket_timeout)
+        try:
+            ip = ip_q.get(timeout=2)
+        except eventlet.queue.Empty:
+            eventlet.sleep(0.1)
+            continue
+        try:
+            c.connect((ip, 443))
+            socket_q.put(ip, timeout=2)
+        except:
+            continue
 
-        query = ("HEAD /search?q=g HTTP/1.1\r\nHost: www.google.com.hk\r\n\r\n"
-                 "GET /%s HTTP/1.1\r\nHost: azzvxgoagent%s.appspot.com\r\n"
-                 "Connection: close\r\n\r\n") % (platform.python_version(), random.randrange(7))
-        writer.write(query.encode('latin1'))
+
+def test_ssl(socket_q, ssl_q, socket_timeout, ssl_timeout):
+    while True:
+        if ssl_q.full():
+            return
+        try:
+            ip = socket_q.get(timeout=2)
+        except eventlet.queue.Empty:
+            eventlet.sleep(0.1)
+            continue
+        c = socket.socket()
+        c.settimeout(socket_timeout)
+        a = ctx.wrap_socket(c)
+        a.settimeout(ssl_timeout)
         s = []
         n = []
-        while True:
-            line = yield from reader.readline()
-            if not line:
-                break
-            status = patterns[0].search(line.decode('latin1'))
-            server_name = patterns[1].search(line.decode('latin1'))
-            if status:
-                status = status.group(1)
-                s.append(status)
-            if server_name:
-                server_name = server_name.group(1)
-                n.append(server_name[:-1])
-        if "200" in s:
-            yield from result.put((ip, s, n))
-        writer.close()
-    except:
-        return
+        try:
+            a.connect((ip, 443))
+            a.send(query.encode('latin1'))
+            r = a.recv(4096).decode('latin1')
+            lines = r.split("\n")
+            for line in lines:
+                status = patterns[0].search(line)
+                server_name = patterns[1].search(line)
+                if status:
+                    status = status.groups()[0]
+                    s.append(status)
+                if server_name:
+                    server_name = server_name.groups()[0]
+                    n.append(server_name[:-1])
+            if "200" in s and ("gws" in n or "Google Frontend" in n):
+                ssl_q.put(ip, timeout=2)
+                logging.info("Found Ip: %s" % ip)
+        except:
+            continue
+
+
+def ip_producer(ipsets, ip_q, ssl_q):
+    tested_socket = 0
+    last = 0
+    while True:
+        found = ssl_q.qsize()
+        logging.info("Testing socket: %d-%d, Found %d" % (last, tested_socket, found))
+        if ssl_q.full():
+            return
+        elif ip_q.qsize() < 100:
+            try:
+                ip_set = ipsets.pop()
+            except:
+                return
+            ips = [ip.strNormal() for ip in list(ip_set)]
+            last = tested_socket
+            tested_socket += len(ips)
+            for ip in ips:
+                ip_q.put(ip, timeout=2)
+        else:
+            eventlet.sleep(1)
+
+
+def terminator(ssl_q, limit, threads):
+    while True:
+        if ssl_q.full():
+            res = []
+            while not ssl_q.empty():
+                res.append(ssl_q.get())
+            logging.info("Avalialbe IPs: %s" % "|".join(res[:limit]))
+            exit(0)
+        eventlet.sleep(2)
+
+
+def run(ipsets, params):
+    socket_limit = params["socket_num"]
+    ssl_limit = params["ssl_num"]
+    limit = params["limit"]
+    socket_timeout = params["socket_timeout"]
+    ssl_timeout = params["ssl_timeout"]
+
+    pool = eventlet.GreenPool(socket_limit+ssl_limit+2)
+    ip_q = eventlet.Queue()
+    ssl_q = eventlet.Queue(limit)
+    socket_q = eventlet.Queue()
+
+    threads = []
+
+    t = pool.spawn(ip_producer, ipsets, ip_q, ssl_q)
+    threads.append(t)
+
+    for i in range(socket_limit):
+        t = pool.spawn(test_socket, ip_q, socket_q, ssl_q, socket_timeout)
+        threads.append(t)
+
+    for i in range(ssl_limit):
+        t = pool.spawn(test_ssl, socket_q, ssl_q, socket_limit, ssl_timeout)
+        threads.append(t)
+
+    pool.spawn_n(terminator, ssl_q, limit, threads)
+    pool.waitall()
+
+
+if __name__ == "__main__":
+    from eventlet.green import ssl
+    from eventlet.green import socket
+    a = socket.socket()
+    ctx = ssl.create_default_context(cafile=cert)
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.set_ciphers(ciphers)
+    ctx.check_hostname = False
+    ctx.wrap_socket(a)
+
