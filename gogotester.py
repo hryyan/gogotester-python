@@ -36,4 +36,5 @@ class Gogotester(object):
 
 if __name__ == "__main__":
     gogo = Gogotester("./ggc.txt", "config.ini")
-    gogo.run()
+    gogo.run(family="IPv4")
+    # gogo.run(family="IPv6")
