@@ -105,7 +105,7 @@ def terminator(ssl_q, limit, threads):
             while not ssl_q.empty():
                 res.append(ssl_q.get())
             logging.info("Avalialbe IPs: %s" % "|".join(res[:limit]))
-            exit(1)
+            exit(0)
         eventlet.sleep(2)
 
 
