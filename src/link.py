@@ -59,6 +59,8 @@ def test_ssl(socket_q, ssl_q, socket_timeout, ssl_timeout):
             a.connect((ip, 443))
             a.send(query.encode('latin1'))
             r = a.recv(4096).decode('latin1')
+            if "Alternate-Protocol" in r or "Alt-Svc" in r:
+                continue
             lines = r.split("\n")
             for line in lines:
                 status = patterns[0].search(line)
@@ -79,9 +81,11 @@ def test_ssl(socket_q, ssl_q, socket_timeout, ssl_timeout):
 def ip_producer(ipsets, ip_q, ssl_q):
     tested_socket = 0
     last = 0
+    first, end = "", ""
     while True:
         found = ssl_q.qsize()
         logging.info("Testing socket: %d-%d, Found %d" % (last, tested_socket, found))
+        # logging.info("First: %s, End: %s" % (first, end))
         if ssl_q.full():
             return
         elif ip_q.qsize() < 100:
@@ -90,6 +94,7 @@ def ip_producer(ipsets, ip_q, ssl_q):
             except:
                 return
             ips = [ip.strNormal() for ip in list(ip_set)]
+            first, end = ips[0], ips[-1]
             last = tested_socket
             tested_socket += len(ips)
             for ip in ips:

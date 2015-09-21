@@ -64,6 +64,8 @@ class Ippool(object):
 
         random.shuffle(self.ipv4)
         random.shuffle(self.ipv6)
+        # self.ipv4 = sorted(self.ipv4)
+        # self.ipv4 = list(reversed(self.ipv4))
 
         self.ipv4_count = 0
         self.ipv6_count = 0
